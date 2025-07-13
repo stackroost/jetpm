@@ -1,12 +1,13 @@
 pub fn show_welcome() {
     println!();
-    println!("Welcome to JetPM!");
-    println!("Your global JavaScript package manager.");
+    println!("Welcome to NeonPack!");
+    println!("Your blazing-fast Node.js build tool.");
     println!();
     println!("Commands:");
-    println!("  jetpm install <name>   Install a package globally");
-    println!("  jetpm use <name>       Link it into your project");
+    println!("  neonpack build        Build your project");
+    println!("  neonpack dev          Start dev server with hot reload");
+    println!("  neonpack serve        Serve the production build");
     println!();
-    println!("Website: https://github.com/stackroost/jetpm");
+    println!("Website");
     println!("────────────────────────────────────────────");
 }

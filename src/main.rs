@@ -1,62 +1,34 @@
+use clap::{Parser, error::ErrorKind};
+mod core;
 mod commands;
-mod utils;
 mod welcome;
 
-use clap::{Parser, Subcommand};
-use commands::list::list_packages;
-use commands::uninstall::uninstall_package;
-use commands::{install::install_package, use_cmd::use_package};
-use commands::info::info_command;
-use welcome::show_welcome;
-
-/// JetPM - Jet-fast global JavaScript package manager
 #[derive(Parser)]
 #[command(
-    name = "jetpm",
-    version,
-    about = "Jet-fast global JavaScript package manager"
+    name = "neonpack",
+    disable_help_flag = true,    
+    disable_version_flag = true  
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    Install {
-        name: String,
-        #[arg(short, long)]
-        internal: bool,
-    },
-    Use {
-        name: String,
-    },
-    List,
-    Uninstall {
-        name: String,
-    },
-    Info { name: String },
+    command: Option<commands::Command>,
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let args: Vec<String> = std::env::args().collect();
 
-    match cli.command {
-        Some(Commands::Install { name, internal }) => {
-            install_package(&name, internal);
-        }
-        Some(Commands::Use { name }) => {
-            use_package(&name);
-        }
-        Some(Commands::Uninstall { name }) => {
-            uninstall_package(&name);
-        }
-        Some(Commands::List) => {
-            list_packages();
-        }
-        Some(Commands::Info { name }) => info_command(&name),
-        None => {
-            show_welcome();
+    match Cli::try_parse_from(&args) {
+        Ok(cli) => match cli.command {
+            Some(cmd) => cmd.execute(),
+            None => welcome::show_welcome(),
+        },
+        Err(e) => {
+            if e.kind() == ErrorKind::DisplayHelp {
+                welcome::show_welcome();
+            } else {
+                e.print().expect("Error writing error");
+                std::process::exit(1);
+            }
         }
     }
 }
