@@ -4,11 +4,16 @@ mod welcome;
 
 use clap::{Parser, Subcommand};
 use commands::{install::install_package, use_cmd::use_package};
+use commands::uninstall::uninstall_package;
 use welcome::show_welcome;
 
 /// JetPM - Jet-fast global JavaScript package manager
 #[derive(Parser)]
-#[command(name = "jetpm", version, about = "Jet-fast global JavaScript package manager")]
+#[command(
+    name = "jetpm",
+    version,
+    about = "Jet-fast global JavaScript package manager"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -31,6 +36,9 @@ enum Commands {
         /// Package name (e.g., chalk)
         name: String,
     },
+    Uninstall {
+        name: String,
+    },
 }
 
 fn main() {
@@ -42,6 +50,9 @@ fn main() {
         }
         Some(Commands::Use { name }) => {
             use_package(&name);
+        }
+        Some(Commands::Uninstall { name }) => {
+            uninstall_package(&name);
         }
         None => {
             show_welcome();
