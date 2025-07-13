@@ -1,0 +1,9 @@
+[package]
+name = "jetpm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+directories = "5.0"
+fs_extra = "1.3"
