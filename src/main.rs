@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use commands::list::list_packages;
 use commands::uninstall::uninstall_package;
 use commands::{install::install_package, use_cmd::use_package};
+use commands::info::info_command;
 use welcome::show_welcome;
 
 /// JetPM - Jet-fast global JavaScript package manager
@@ -34,6 +35,7 @@ enum Commands {
     Uninstall {
         name: String,
     },
+    Info { name: String },
 }
 
 fn main() {
@@ -52,6 +54,7 @@ fn main() {
         Some(Commands::List) => {
             list_packages();
         }
+        Some(Commands::Info { name }) => info_command(&name),
         None => {
             show_welcome();
         }
