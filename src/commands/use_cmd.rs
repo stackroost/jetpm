@@ -1,25 +1,46 @@
 use std::fs;
+use std::path::PathBuf;
+use crate::utils::get_global_path;
 
-use crate::utils::get_global_package_dir;
+/// Activates (symlinks) the latest installed version of a package into `node_modules`
+pub fn use_package(pkg: &str) {
+    // Find latest version installed under ~/.jetpm/lib/<pkg>/
+    let base_path = get_global_path(pkg, ""); // We'll trim version from here
 
-pub fn use_package(name: &str) {
-    let global_dir = get_global_package_dir(name);
-    let current_dir = std::env::current_dir().unwrap();
-    let target_link = current_dir.join("node_modules").join(name);
+    // Get list of versions under ~/.jetpm/lib/pkg/
+    let version_root = base_path.parent().unwrap();
+    let versions = fs::read_dir(version_root).unwrap();
 
-    println!("Linking '{}' to {:?}", name, target_link);
+    let mut latest_version: Option<String> = None;
 
-    fs::create_dir_all(target_link.parent().unwrap()).unwrap();
-
-    if target_link.exists() {
-        fs::remove_file(&target_link).unwrap();
+    for entry in versions {
+        let entry = entry.unwrap();
+        if entry.path().is_dir() {
+            let name = entry.file_name().into_string().unwrap();
+            latest_version = Some(name);
+        }
     }
 
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&global_dir, &target_link).unwrap();
+    if latest_version.is_none() {
+        println!("No installed versions of '{}' found.", pkg);
+        return;
+    }
 
-    #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(&global_dir, &target_link).unwrap();
+    let version = latest_version.unwrap();
+    let real_path = get_global_path(pkg, &version);
+    let node_modules = PathBuf::from("node_modules");
 
-    println!("Package '{}' linked to this project.", name);
+    if !node_modules.exists() {
+        fs::create_dir_all(&node_modules).unwrap();
+    }
+
+    let link_path = node_modules.join(pkg);
+
+    if link_path.exists() {
+        fs::remove_file(&link_path).ok();
+    }
+
+    std::os::unix::fs::symlink(&real_path, &link_path).unwrap();
+
+    println!("Linked {}@{} → node_modules/{}", pkg, version, pkg);
 }
