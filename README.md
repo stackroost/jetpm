@@ -1,8 +1,3 @@
-Here is the full, corrected `README.md` file content as you requested, with the proper Markdown structure, correct code formatting, and all CLI command documentation included:
-
----
-
-```md
 # NeonPack
 
 A fast global JavaScript package manager and runtime engine built in Rust.  
