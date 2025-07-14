@@ -1,93 +1,93 @@
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use serde_json::Value;
-use toml_edit::DocumentMut;
 
 pub fn resolve_global_import(pkg: &str, subpath: Option<&str>) -> Option<PathBuf> {
-    let config_path = Path::new("neonpack-config.toml");
-    let lock_path = Path::new("neonpack-lock.json");
+    if !is_package_declared(pkg) {
+        eprintln!("Package '{}' not declared in package.json", pkg);
+        std::process::exit(1); 
+    }
 
-    // Load config and lock files
-    let config_data = fs::read_to_string(config_path)
-        .map_err(|e| eprintln!("Failed to read neonpack-config.toml: {}", e))
-        .ok()?;
-    let lock_data = fs::read_to_string(lock_path)
-        .map_err(|e| eprintln!("Failed to read neonpack-lock.json: {}", e))
-        .ok()?;
+    let version =
+        get_pinned_version_from_package_json(pkg).or_else(|| get_latest_installed_version(pkg))?;
 
-    // Parse config and lock files
-    let config_doc = config_data
-        .parse::<DocumentMut>()
-        .map_err(|e| eprintln!("Invalid TOML in neonpack-config.toml: {}", e))
-        .ok()?;
-    let lock_json: Value = serde_json::from_str(&lock_data)
-        .map_err(|e| eprintln!("Invalid JSON in neonpack-lock.json: {}", e))
-        .ok()?;
+    let base = dirs::home_dir()?
+        .join(".neonpack/lib")
+        .join(pkg)
+        .join(&version);
 
-    // Get version from dependencies table
-    let _version = config_doc
-        .get("dependencies")
-        .and_then(|deps| deps.as_table())
-        .and_then(|table| table.get(pkg))
-        .and_then(|item| item.as_str())
-        .ok_or_else(|| eprintln!("Package '{}' not found in neonpack-config.toml dependencies", pkg))
-        .ok()?;
+    let package_json_path = base.join("package.json");
+    let package_data = fs::read_to_string(&package_json_path).ok()?;
+    let package_json: Value = serde_json::from_str(&package_data).ok()?;
 
-    // Get package path from lockfile
-    let pkg_info = lock_json
-        .get(pkg)
-        .ok_or_else(|| eprintln!("Package '{}' not found in neonpack-lock.json", pkg))
-        .ok()?;
-    let pkg_path = PathBuf::from(
-        pkg_info
-            .get("path")
-            .and_then(|p| p.as_str())
-            .ok_or_else(|| eprintln!("Missing 'path' for '{}' in neonpack-lock.json", pkg))
-            .ok()?,
-    );
-
-    // Load and parse package.json
-    let package_json_path = pkg_path.join("package.json");
-    let package_data = fs::read_to_string(&package_json_path)
-        .map_err(|e| eprintln!("Failed to read package.json at {}: {}", package_json_path.display(), e))
-        .ok()?;
-    let package_json: Value = serde_json::from_str(&package_data)
-        .map_err(|e| eprintln!("Invalid JSON in package.json at {}: {}", package_json_path.display(), e))
-        .ok()?;
-
-    // Handle subpath (if provided, for future use)
     if let Some(sub) = subpath {
-        let subpath_file = pkg_path.join(sub);
+        let subpath_file = base.join(sub);
         if subpath_file.exists() {
             return Some(subpath_file);
         }
     }
-
-    // Resolve module path based on package.json fields
     if let Some(exports) = package_json.get("exports") {
         if exports.is_object() {
             if let Some(import_val) = exports.get("import") {
                 if let Some(entry) = import_val.as_str() {
-                    return Some(pkg_path.join(entry));
+                    return Some(base.join(entry));
                 }
             }
         } else if exports.is_string() {
-            return Some(pkg_path.join(exports.as_str().unwrap()));
+            return Some(base.join(exports.as_str().unwrap()));
         }
     }
-
-    if let Some(module_field) = package_json.get("module") {
-        if let Some(module_path) = module_field.as_str() {
-            return Some(pkg_path.join(module_path));
-        }
+    if let Some(module_path) = package_json.get("module").and_then(|m| m.as_str()) {
+        return Some(base.join(module_path));
+    }
+    if let Some(main_path) = package_json.get("main").and_then(|m| m.as_str()) {
+        return Some(base.join(main_path));
     }
 
-    if let Some(main_field) = package_json.get("main") {
-        if let Some(main_path) = main_field.as_str() {
-            return Some(pkg_path.join(main_path));
-        }
+    Some(base.join("index.js"))
+}
+
+fn get_pinned_version_from_package_json(pkg: &str) -> Option<String> {
+    let path = Path::new("package.json");
+    let content = fs::read_to_string(path).ok()?;
+    let json: Value = serde_json::from_str(&content).ok()?;
+    json.get("dependencies")?
+        .get(pkg)?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
+fn get_latest_installed_version(pkg: &str) -> Option<String> {
+    let base_dir = dirs::home_dir()?.join(".neonpack/lib").join(pkg);
+    if !base_dir.exists() {
+        return None;
     }
 
-    // Default to index.js
-    Some(pkg_path.join("index.js"))
+    let mut versions: Vec<String> = fs::read_dir(&base_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+
+    versions.sort();
+    versions.pop()
+}
+
+
+fn is_package_declared(pkg: &str) -> bool {
+    let path = Path::new("package.json");
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    let json: Value = match serde_json::from_str(&content) {
+        Ok(j) => j,
+        Err(_) => return false,
+    };
+
+    let deps = json.get("dependencies").and_then(|d| d.as_object());
+    let dev_deps = json.get("devDependencies").and_then(|d| d.as_object());
+
+    deps.map_or(false, |d| d.contains_key(pkg)) || dev_deps.map_or(false, |d| d.contains_key(pkg))
 }

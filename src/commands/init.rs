@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path};
+use std::path::Path;
 
 pub fn run() {
     let config_path = Path::new("neonpack-config.toml");
