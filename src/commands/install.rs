@@ -17,20 +17,35 @@ pub fn run(args: InstallArgs) {
     let pkg = args.package;
     println!("Installing: {}", pkg);
 
-    // 1. Get latest version info from npm
     let url = format!("https://registry.npmjs.org/{}", pkg);
     let response = get(&url).expect("Failed to fetch package metadata");
     let meta: Value = response.json().expect("Invalid npm response");
 
-    let latest_version = meta["dist-tags"]["latest"]
-        .as_str()
-        .expect("Failed to get latest version");
+    let latest_version = match meta
+        .get("dist-tags")
+        .and_then(|tags| tags.get("latest"))
+        .and_then(|v| v.as_str())
+    {
+        Some(v) => v,
+        None => {
+            eprintln!("Package '{}' not found on npm", pkg);
+            std::process::exit(1);
+        }
+    };
+    let tarball_url = match meta
+        .get("versions")
+        .and_then(|v| v.get(latest_version))
+        .and_then(|ver| ver.get("dist"))
+        .and_then(|d| d.get("tarball"))
+        .and_then(|t| t.as_str())
+    {
+        Some(url) => url,
+        None => {
+            eprintln!("Tarball URL not found for '{}@{}'", pkg, latest_version);
+            std::process::exit(1);
+        }
+    };
 
-    let tarball_url = meta["versions"][latest_version]["dist"]["tarball"]
-        .as_str()
-        .expect("Failed to get tarball URL");
-
-    // 2. Download and extract
     let resp = get(tarball_url).expect("Failed to download tarball");
     let bytes = resp.bytes().expect("Failed to read tarball");
 
@@ -41,13 +56,7 @@ pub fn run(args: InstallArgs) {
         extract_tarball(&bytes, &global_path);
         println!("Installed to {}", global_path.display());
     }
-
-    // 3. Update config & lock
-    update_config_toml(&pkg, latest_version);
-    update_lock_json(&pkg, latest_version, &global_path);
 }
-
-// ---------------------- Helpers ----------------------
 
 fn get_global_path(pkg: &str, version: &str) -> PathBuf {
     dirs::home_dir()
@@ -61,7 +70,6 @@ fn extract_tarball(data: &bytes::Bytes, target: &Path) {
     let tar = GzDecoder::new(Cursor::new(data));
     let mut archive = Archive::new(tar);
 
-    // Extract into a temp dir first (optional)
     archive
         .entries()
         .expect("Failed to read tar entries")
@@ -78,65 +86,4 @@ fn extract_tarball(data: &bytes::Bytes, target: &Path) {
 
             entry.unpack(&final_path).expect("Failed to extract file");
         });
-}
-
-fn update_config_toml(pkg: &str, version: &str) {
-    use toml_edit::{value, DocumentMut, Item, Table};
-
-    let path = Path::new("neonpack-config.toml");
-
-    let mut doc = if path.exists() {
-        let content = fs::read_to_string(path).expect("Failed to read config");
-        content.parse::<DocumentMut>().expect("Invalid TOML")
-    } else {
-        // Create a new document with package and dependencies sections
-        let default_config = String::from(
-            r#"[package]
-name = "my-app"
-version = "0.1.0"
-
-[dependencies]
-"#,
-        );
-        default_config
-            .parse::<DocumentMut>()
-            .expect("Failed to create new config")
-    };
-
-    // Ensure dependencies table exists and insert package
-    let dependencies = doc
-        .entry("dependencies")
-        .or_insert(Item::Table(Table::new()));
-    if let Item::Table(table) = dependencies {
-        table.insert(pkg, value(version));
-    }
-
-    // Save updated config
-    fs::write(path, doc.to_string()).expect("Failed to write neonpack-config.toml");
-    println!("Updated neonpack-config.toml");
-}
-
-fn update_lock_json(pkg: &str, version: &str, path: &Path) {
-    use serde_json::{json, Map};
-
-    let lock_path = Path::new("neonpack-lock.json");
-
-    let mut lock: Map<String, Value> = if lock_path.exists() {
-        let data = fs::read_to_string(lock_path).expect("Failed to read lock");
-        serde_json::from_str(&data).unwrap_or_default()
-    } else {
-        Map::new()
-    };
-
-    lock.insert(
-        pkg.to_string(),
-        json!({
-            "version": version,
-            "path": path.to_str().unwrap()
-        }),
-    );
-
-    let output = serde_json::to_string_pretty(&lock).expect("Failed to write lock JSON");
-    fs::write(lock_path, output).expect("Failed to save neonpack-lock.json");
-    println!("Updated neonpack-lock.json");
 }
