@@ -5,11 +5,12 @@ use std::path::{Path, PathBuf};
 pub fn resolve_global_import(pkg: &str, subpath: Option<&str>) -> Option<PathBuf> {
     if !is_package_declared(pkg) {
         eprintln!("Package '{}' not declared in package.json", pkg);
-        std::process::exit(1); 
+        std::process::exit(1);
     }
 
-    let version =
-        get_pinned_version_from_package_json(pkg).or_else(|| get_latest_installed_version(pkg))?;
+    let version = get_pinned_version_from_package_json(pkg)
+        .or_else(|| get_version_from_config(pkg))
+        .or_else(|| get_latest_installed_version(pkg))?;
 
     let base = dirs::home_dir()?
         .join(".neonpack/lib")
@@ -26,6 +27,7 @@ pub fn resolve_global_import(pkg: &str, subpath: Option<&str>) -> Option<PathBuf
             return Some(subpath_file);
         }
     }
+
     if let Some(exports) = package_json.get("exports") {
         if exports.is_object() {
             if let Some(import_val) = exports.get("import") {
@@ -37,9 +39,11 @@ pub fn resolve_global_import(pkg: &str, subpath: Option<&str>) -> Option<PathBuf
             return Some(base.join(exports.as_str().unwrap()));
         }
     }
+
     if let Some(module_path) = package_json.get("module").and_then(|m| m.as_str()) {
         return Some(base.join(module_path));
     }
+
     if let Some(main_path) = package_json.get("main").and_then(|m| m.as_str()) {
         return Some(base.join(main_path));
     }
@@ -57,24 +61,15 @@ fn get_pinned_version_from_package_json(pkg: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn get_latest_installed_version(pkg: &str) -> Option<String> {
-    let base_dir = dirs::home_dir()?.join(".neonpack/lib").join(pkg);
-    if !base_dir.exists() {
-        return None;
-    }
-
-    let mut versions: Vec<String> = fs::read_dir(&base_dir)
-        .ok()?
-        .filter_map(|entry| entry.ok())
-        .filter_map(|e| e.file_name().into_string().ok())
-        .collect();
-
-    versions.sort();
-    versions.pop()
+pub fn get_latest_installed_version(pkg: &str) -> Option<String> {
+    let path = Path::new("jetpm-lock.json");
+    let content = fs::read_to_string(path).ok()?;
+    let json: Value = serde_json::from_str(&content).ok()?;
+    let deps = json.get("dependencies")?;
+    deps.get(pkg)?.get("version")?.as_str().map(String::from)
 }
 
-
-fn is_package_declared(pkg: &str) -> bool {
+pub fn is_package_declared(pkg: &str) -> bool {
     let path = Path::new("package.json");
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
@@ -90,4 +85,21 @@ fn is_package_declared(pkg: &str) -> bool {
     let dev_deps = json.get("devDependencies").and_then(|d| d.as_object());
 
     deps.map_or(false, |d| d.contains_key(pkg)) || dev_deps.map_or(false, |d| d.contains_key(pkg))
+}
+
+pub fn get_version_from_config(pkg: &str) -> Option<String> {
+    let path = Path::new("package.json");
+    let content = fs::read_to_string(path).ok()?;
+    let json: Value = serde_json::from_str(&content).ok()?;
+
+    json.get("dependencies")
+        .and_then(|deps| deps.get(pkg))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| {
+            json.get("devDependencies")
+                .and_then(|dev| dev.get(pkg))
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
 }
